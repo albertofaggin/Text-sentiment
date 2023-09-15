@@ -1,0 +1,217 @@
+############################### Loading the libraries ################# #############
+rm(list=ls())
+library(readtext)
+library(knitr)
+library(lubricate)
+library(tidyverse)
+library(tidytext)
+library(reshape2)
+library(tm)
+library(topicmodels)
+library(stringr)
+library(SnowballC)
+library(LDAvis)
+library(tsne)
+libraries(wordcloud)
+library(ldatuning)
+library(how much)
+library(syuzhet)
+library(TextWiller)
+
+
+################################ Reading data ################ ###############
+lyrics = Sys.glob(file.path("~/Desktop/Master/Social Media/Progetto/Testi_Canzoni_Classifica/01. First classified", quote = "","*.txt"))
+
+
+text= NULL
+for (i in 1:length(lyrics)) {
+   t=readtext(lyrics[i])
+   X <- as.character(t[1:nrow(t),])
+   text <- c(text, X)
+}
+#text
+
+# corpus construction
+sep.corpus <- corpus(text)
+
+library(dplyr)
+text_df <- tibble(line = 1:length(text), text = text)
+text_df
+
+
+############################## Cleaning the dataset ################## #############
+
+# Correction of apostrophes
+text_df <- text_df %>%
+   mutate(text = str_replace_all(text, "[\'’](?!\\s)", "' "))
+
+texts_all <- text_df %>%
+   unnest_tokens(word, text)
+
+# I eliminate stopwords
+lyrics_all <- lyrics_all %>%
+   anti_join(get_stopwords(language = "en"))
+
+# I delete the words chorus and verse
+lyrics_all <- lyrics_all %>%
+   filter(word!="chorus"&word!="verse"&word!="lyrics"&word!="You" &word!="might"&word!="also"
+          &word!="likeEmbed"&word!="likeembed"&word!="like")
+
+# We eliminate "words" 1, 2 char long
+lyrics_all <- lyrics_all %>%
+   filter(nchar(word)>3)
+
+
+############################## Frequency calculation ################## #############
+
+# We calculate the frequencies of each word per document
+testi_all = testi_all %>% group_by(line,word) %>% dplyr::mutate(freq = n()) %>% unique()
+
+# Calculate overall frequencies to clean rare words
+testi_all = testi_all %>% ungroup() %>% group_by(word) %>% dplyr::mutate(tot=n())
+
+# top 25 words by frequency
+testi_all %>% group_by(word) %>% dplyr::summarise(tot=n()) %>% arrange(desc(tot)) %>% print(n=10)
+
+
+# I prepare a structure for tagcloud
+tag_words = texts_all %>% select(word,tot) %>% unique()
+
+# Word cloud plot
+ccol = RColorBrewer::brewer.pal(8,"Dark2")
+wordcloud(words = tag_words$word,freq = tag_words$tot,min.freq = 5,colors=ccol)
+
+
+########################## Document term matrix / dtm #################### #######
+
+# dtm = array that can be inspected
+dtm = testi_all %>% cast_dtm(document = line,term = word,value = freq)
+inspect(dtm)
+
+# each row a document (song), each column the word mentioned, in the cells the frequency
+
+# LDA use of LDA package with k = 6 topics
+# choice of topic?
+ly_lda = LDA(dtm, k = 6, method="Gibbs", control = list(seed = 1123, burnin=1000, iter=1000))
+
+# Word-topic probabilities
+ly_topics <- tidy(ly_lda, matrix = "beta")
+ly_topics
+
+# Most frequent words
+ly_top_terms <- ly_topics %>%
+   group_by(topic) %>%
+   slice_max(beta, n = 10) %>%
+   ungroup() %>%
+   arrange(topic, -beta)
+
+# Plot
+ly_top_terms %>%
+   mutate(term = reorder_within(term, beta, topic)) %>%
+   ggplot(aes(beta, term, fill = factor(topic))) +
+   geom_col(show.legend = FALSE) +
+   facet_wrap(~ topic, scales = "free") +
+   scale_y_reordered()
+
+# does it separate well?
+gamma_doc = tidy(ly_lda, matrix = "gamma")
+gamma_doc %>% arrange(document)
+
+boxplot(gamma_doc$gamma ~ gamma_doc$topic)
+
+
+# Interactive visualization
+tmResult<-posterior(ly_lda)
+beta <- tmResult$terms
+theta <- tmResult$topics
+
+DTM<-dtm
+svd_tsne <- function(x) tsne(svd(x)$u)
+json <- createJSON(
+   phi = beta,
+   theta = theta,
+   doc.length = rowSums(as.array(DTM)),
+   vocab = colnames(as.array(DTM)),
+   term.frequency = colSums(as.array(DTM)),
+   mds.method = svd_tsne,
+   plot.opts = list(xlab="", ylab="")
+)
+
+serVis(json)
+
+######################## Most frequent word association ########################
+
+# The most recurring terms are observed
+findFreqTerms(dtm, 50, Inf)
+
+# "Love"
+data(Madda vocabularies)
+df_voc = reshape2::melt(vocabulariMadda,value.name = "word")
+head(df_voc)
+
+### "Love" association
+
+love_as = findAssocs(dtm, "love", 0.25) # Terms with association greater than 0.25 "love"
+love_ass = data.frame(love_as)
+love_ass = cbind(row.names(love_ass), love_ass)
+colnames(love_ass) = c("word", "freq")
+
+# Barplot sentiment word "love"
+sent_love <- get_nrc_sentiment(vec(love_ass[,1]), lang="italian")
+barplot(
+   colSums(prop.table(sent_love[, 1:8])),
+   space = 0.2,
+   horiz = FALSE,
+   las = 1,
+   cex.names = 0.7,
+   col = brewer.pal(n = 8, name = "Set3"),
+   main = "Sentiment Sanremo",
+   xlab="Emotions", ylab = NULL)
+
+# Sentiment: NEGATIVE and POSITIVE
+
+word_sent = data.frame(word = unique(love_ass$word), s="neutral")
+
+for( i in 1:NROW(word_sent)) {
+   idw = which(str_starts(word_sent$word[i],df_voc$word))
+   if(length(idw) != 0) word_sent$s[i] = df_voc$L1[idw]
+  
+   if(i %% 100 == 0) cat(i,"\n")
+}
+
+# I associate the sentiment with join on the single word
+tt_love_ss = love_ass %>% left_join(word_sent, by = "word")
+
+# Examples of negative sentiment
+neg_word_love = tt_love_ss %>% filter(s == "negative")
+
+# Examples of positive sentiment
+pos_word_love= tt_love_ss %>% filter(s == "positive")
+
+# Barplot positive and negative words
+word_love = rbind(neg_word_love,pos_word_love)
+ggplot(word_love) +
+   aes(x = word, y = freq, fill = s) +
+   geom_col() +
+   scale_fill_hue(direction = 1) +
+   labs(
+     x = "Associated words",
+     y = "Frequency",
+     title = "Words associated with the word \"love\""
+   ) +
+   theme_minimal() +
+   theme(legend.position = "top") +
+   ylim(0, 0.6)
+
+
+wordcloud(words = neg_word_love$word, freq = neg_word_love$freq,
+           min.freq = 0, color = brewer.pal(4,"Dark2") )
+wordcloud(words = pos_word_love$word, freq = pos_word_love$freq,
+           min.freq = 0, color = brewer.pal(4,"Dark2") )
+
+# Barplot positive and negative words
+word_love = rbind(neg_word_love,pos_word_love)
+
+
+wordcloud(words = word_love$word, freq = word_love$freq,
+           min.freq = 0, color = brewer.pal(6,"Dark2") )
