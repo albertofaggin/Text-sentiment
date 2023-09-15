@@ -1,0 +1,82 @@
+################################ Sentiment analysis ###############################
+data(Madda vocabularies)
+df_voc = reshape2::melt(vocabulariMadda,value.name = "word")
+head(df_voc)
+
+data = texts_all[,2]
+data = data.frame(data)
+data = old(data)
+sentiment_scores <- get_nrc_sentiment(dati, lang="italian")
+head(sentiment_scores,20)
+summary(sentiment_scores)
+
+barplot(
+   colSums(prop.table(sentiment_scores[, 1:8])),
+   space = 0.2,
+   horiz = FALSE,
+   las = 1,
+   cex.names = 0.7,
+   col = brewer.pal(n = 8, name = "Set3"),
+   main = "Sentiment Sanremo",
+   xlab="Emotions", ylab = NULL)
+
+# Sad words
+sad_words <- data[sentiment_scores$sadness> 0]
+sad_word_order <- sort(table(unlist(sad_words)), decreasing = TRUE)
+head(sad_word_order, n = 12)
+
+head(sad_word_order)
+sad_data = sad_word_order
+sad_data = data.frame(sad_data)
+
+# tag cloud neg
+wordcloud(words = sad_data$Var1, freq = sad_data$Freq,min.freq = 3,color = brewer.pal(4,"Dark2"))
+
+
+# Anger words
+anger_words <- data[sentiment_scores$anger > 0]
+anger_word_order <- sort(table(unlist(anger_words)), decreasing = TRUE)
+head(anger_word_order, n = 12)
+
+head(anger_word_order)
+anger_data = anger_word_order
+anger_data = data.frame(anger_data)
+
+# tag cloud neg
+wordcloud(words = anger_data$Var1, freq = anger_data$Freq,min.freq = 3,color = brewer.pal(4,"Dark2"))
+
+# Words happiness
+joy_words <- data[sentiment_scores$joy > 0]
+joy_word_order <- sort(table(unlist(joy_words)), decreasing = TRUE)
+head(joy_word_order, n = 12)
+
+head(joy_word_order)
+joy_data = joy_word_order
+joy_data = data.frame(joy_data)
+
+# tag cloud neg
+wordcloud(words = joy_data$Var1, freq = joy_data$Freq,min.freq = 3,color = brewer.pal(4,"Dark2"))
+
+
+# Cloud of words in comparison
+
+cloud_emotions_data <- c(
+   paste(data[sentiment_scores$sadness> 0], collapse = " "),
+   paste(data[sentiment_scores$joy > 0], collapse = " "),
+   paste(data[sentiment_scores$anger > 0], collapse = " "),
+   paste(data[sentiment_scores$fear > 0], collapse = " "))
+
+
+cloud_corpus <- Corpus(VectorSource(cloud_emotions_data))
+cloud_tdm <- TermDocumentMatrix(cloud_corpus)
+cloud_tdm <- as.matrix(cloud_tdm)
+head(cloud_tdm)
+
+
+colnames(cloud_tdm) <- c('sadness', 'happiness', 'anger', 'joy')
+head(cloud_tdm)
+
+set.seed(757) # this can be set to any integer
+comparison.cloud(cloud_tdm, random.order = FALSE,
+                  colors = c("green", "red", "orange", "blue"),
+                  title.size = 1, max.words = 50, scale = c(2.5, 1), rot.per = 0.4)
